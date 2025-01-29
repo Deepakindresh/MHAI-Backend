@@ -63,14 +63,37 @@ class UserProfile(BaseModel):
     gender: Optional[str]
 
 async def get_embeddings(text: str) -> list:
-    """Generate embeddings using the model."""
-    # Use the model's embeddings capability
-    with torch.no_grad():
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to("cuda")
-        embeddings = model(**inputs, output_hidden_states=True).hidden_states[-1]
-        # Take mean of last layer embeddings
-        embedding = embeddings.mean(dim=1).squeeze().cpu().numpy()
-        return embedding.tolist()
+    """Generate embeddings using the model and resize to match database dimensions."""
+    try:
+        with torch.no_grad():
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to("cuda")
+            embeddings = model(**inputs, output_hidden_states=True).hidden_states[-1]
+            embeddings = embeddings.float()
+            # Take mean of last layer embeddings
+            embedding = embeddings.mean(dim=1).squeeze().cpu().numpy()
+            
+            # Resize to 512 dimensions using averaging
+            if len(embedding) != 512:
+                # Reshape the embedding to 2D array for resizing
+                original_embedding = embedding.reshape(1, -1)
+                target_size = 512
+                # Calculate how many original dimensions to average together
+                step = len(embedding) // target_size
+                resized_embedding = np.zeros(target_size)
+                
+                for i in range(target_size):
+                    start_idx = i * step
+                    end_idx = start_idx + step
+                    if i == target_size - 1:  # Handle any remaining dimensions in the last group
+                        end_idx = len(embedding)
+                    resized_embedding[i] = np.mean(original_embedding[0, start_idx:end_idx])
+                
+                embedding = resized_embedding
+
+            return embedding.astype(float).tolist()
+    except Exception as e:
+        print(f"Error generating embeddings: {str(e)}")
+        return [0.0] * 512  # Return zero vector of correct dimension as fallback
 
 async def get_user_profile(user_id: str) -> Optional[UserProfile]:
     """Fetch user profile from database."""
@@ -175,25 +198,29 @@ async def chat(request: ChatRequest):
         outputs = model.generate(**input_ids, max_new_tokens=4000, use_cache=True)
         response = tokenizer.batch_decode(outputs)[0].split("### Response:")[1].strip()
 
-        # Store messages with embeddings
-        user_message_embedding = await get_embeddings(request.text)
-        bot_message_embedding = await get_embeddings(response)
+        try:
+            user_message_embedding = await get_embeddings(request.text)
+            bot_message_embedding = await get_embeddings(response)
 
-        # Store both messages in the database
-        supabase_client.table('chat_messages').insert([
-            {
-                'user_id': request.user_id,
-                'content': request.text,
-                'is_bot': False,
-                'embedding': user_message_embedding
-            },
-            {
-                'user_id': request.user_id,
-                'content': response,
-                'is_bot': True,
-                'embedding': bot_message_embedding
-            }
-        ]).execute()
+            # Store both messages in the database
+            supabase_client.table('chat_messages').insert([
+                {
+                    'user_id': request.user_id,
+                    'content': request.text,
+                    'is_bot': False,
+                    'embedding': user_message_embedding
+                },
+                {
+                    'user_id': request.user_id,
+                    'content': response,
+                    'is_bot': True,
+                    'embedding': bot_message_embedding
+                }
+            ]).execute()
+        except Exception as e:
+            print(f"Error storing messages: {str(e)}")
+            # Continue even if storage fails
+            pass
 
         return {
             "response": response,
@@ -201,8 +228,8 @@ async def chat(request: ChatRequest):
         }
 
     except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=5001, reload=True)
 

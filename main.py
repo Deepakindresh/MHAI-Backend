@@ -198,6 +198,8 @@ async def chat(request: ChatRequest):
         outputs = model.generate(**input_ids, max_new_tokens=4000, use_cache=True)
         response = tokenizer.batch_decode(outputs)[0].split("### Response:")[1].strip()
 
+        response = response.replace("<|end_of_text|>", "")
+
         try:
             user_message_embedding = await get_embeddings(request.text)
             bot_message_embedding = await get_embeddings(response)

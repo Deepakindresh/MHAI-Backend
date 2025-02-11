@@ -30,7 +30,7 @@ supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
 supabase_client: Client = supabase.create_client(supabase_url, supabase_key)
 
 # Model configuration
-max_seq_length = 8000
+max_seq_length = 8192
 dtype = None
 load_in_4bit = True
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
@@ -43,7 +43,7 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 
 # Load model and tokenizer
 model, tokenizer = FastLanguageModel.from_pretrained(
-    token="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",
+    token=os.getenv("HUGGINGFACE_TOKEN"),
     model_name="Deepakindresh/llama_therapist",
     max_seq_length=max_seq_length,
     dtype=dtype,
@@ -62,6 +62,16 @@ class UserProfile(BaseModel):
     age: int
     gender: Optional[str]
 
+class Assessment(BaseModel):
+    gad7_score: int
+    gad7_severity: str
+    phq9_score: int
+    phq9_severity: str
+    ptsd_positive: bool
+    has_suicidal_thoughts: bool
+    raw_responses: dict
+    assessment_date: datetime
+
 async def get_embeddings(text: str) -> list:
     """Generate embeddings using the model and resize to match database dimensions."""
     try:
@@ -69,22 +79,18 @@ async def get_embeddings(text: str) -> list:
             inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to("cuda")
             embeddings = model(**inputs, output_hidden_states=True).hidden_states[-1]
             embeddings = embeddings.float()
-            # Take mean of last layer embeddings
             embedding = embeddings.mean(dim=1).squeeze().cpu().numpy()
             
-            # Resize to 512 dimensions using averaging
             if len(embedding) != 512:
-                # Reshape the embedding to 2D array for resizing
                 original_embedding = embedding.reshape(1, -1)
                 target_size = 512
-                # Calculate how many original dimensions to average together
                 step = len(embedding) // target_size
                 resized_embedding = np.zeros(target_size)
                 
                 for i in range(target_size):
                     start_idx = i * step
                     end_idx = start_idx + step
-                    if i == target_size - 1:  # Handle any remaining dimensions in the last group
+                    if i == target_size - 1:
                         end_idx = len(embedding)
                     resized_embedding[i] = np.mean(original_embedding[0, start_idx:end_idx])
                 
@@ -93,7 +99,7 @@ async def get_embeddings(text: str) -> list:
             return embedding.astype(float).tolist()
     except Exception as e:
         print(f"Error generating embeddings: {str(e)}")
-        return [0.0] * 512  # Return zero vector of correct dimension as fallback
+        return [0.0] * 512
 
 async def get_user_profile(user_id: str) -> Optional[UserProfile]:
     """Fetch user profile from database."""
@@ -109,7 +115,7 @@ async def get_user_profile(user_id: str) -> Optional[UserProfile]:
         print(f"Error fetching user profile: {str(e)}")
         return None
 
-async def get_latest_assessment(user_id: str) -> Optional[dict]:
+async def get_latest_assessment(user_id: str) -> Optional[Assessment]:
     """Fetch user's latest mental health assessment."""
     try:
         response = supabase_client.table('mental_health_assessments') \
@@ -119,7 +125,7 @@ async def get_latest_assessment(user_id: str) -> Optional[dict]:
             .limit(1) \
             .execute()
         
-        return response.data[0] if response.data else None
+        return Assessment(**response.data[0]) if response.data else None
     except Exception as e:
         print(f"Error fetching assessment: {str(e)}")
         return None
@@ -134,7 +140,7 @@ async def get_relevant_context(user_id: str, current_message: str) -> str:
             {
                 'query_embedding': current_embedding,
                 'match_threshold': 0.7,
-                'match_count': 3,  # Limit to 3 most relevant messages
+                'match_count': 3,
                 'user_id': user_id
             }
         ).execute()
@@ -144,16 +150,38 @@ async def get_relevant_context(user_id: str, current_message: str) -> str:
             role = "Assistant" if msg['is_bot'] else "User"
             context_messages.append(f"{role}: {msg['content']}")
         
-        return "\n".join(context_messages[-3:])  # Only use last 3 messages
+        return "\n".join(context_messages[-3:])
     except Exception as e:
         print(f"Error getting context: {str(e)}")
         return ""
 
+
+def get_severity_description(assessment: Assessment) -> str:
+    """Generate a description of the user's mental health severity using stored values."""
+    descriptions = []
+    
+    # Use stored severity levels directly
+    if assessment.gad7_severity != 'Minimal':
+        descriptions.append(f"{assessment.gad7_severity.lower()} anxiety")
+        
+    if assessment.phq9_severity != 'None-minimal':
+        descriptions.append(f"{assessment.phq9_severity.lower()} depression")
+        
+    if assessment.ptsd_positive:
+        descriptions.append("PTSD symptoms")
+        
+    if assessment.has_suicidal_thoughts:
+        descriptions.append("suicidal thoughts")
+    
+    if not descriptions:
+        return "minimal symptoms"
+        
+    return ", ".join(descriptions)
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
-    """
-    Process chat requests with user context and store in database.
-    """
+    """Process chat requests with user context and store in database."""
     try:
         if not request.text:
             raise HTTPException(status_code=400, detail="No input text provided")
@@ -170,15 +198,18 @@ async def chat(request: ChatRequest):
         - Age: {user_profile.age if user_profile else 'Unknown'}
         
         Mental Health Status:
-        - Depression Level: {assessment['depression_level'] if assessment else 'Not assessed'}/10
-        - Anxiety Level: {assessment['anxiety_level'] if assessment else 'Not assessed'}/10
-        - PTSD Level: {assessment['ptsd_level'] if assessment else 'Not assessed'}/10
+        - Anxiety: {assessment.gad7_severity if assessment else 'Not assessed'} (GAD-7)
+        - Depression: {assessment.phq9_severity if assessment else 'Not assessed'} (PHQ-9)
+        - PTSD Screening: {'Positive' if assessment and assessment.ptsd_positive else 'Negative' if assessment else 'Not assessed'}
+        {'- Has reported suicidal thoughts' if assessment and assessment.has_suicidal_thoughts else ''}
+        
+        Current Status: {get_severity_description(assessment) if assessment else 'Not assessed'}
         
         Recent Conversation Context:
         {context}
         """
 
-        # Prepare the complete prompt
+        # Rest of the chat function remains the same...
         instruction = f"""
         Play the role of an empathetic and kind psychotherapist (cognitive-behavioral therapy). 
         You are speaking to a {user_profile.age if user_profile else ''} year old person.
@@ -193,11 +224,12 @@ async def chat(request: ChatRequest):
             ""
         )
 
+        print(prompt)
+
         # Generate response
         input_ids = tokenizer([prompt], return_tensors="pt").to("cuda")
         outputs = model.generate(**input_ids, max_new_tokens=4000, use_cache=True)
         response = tokenizer.batch_decode(outputs)[0].split("### Response:")[1].strip()
-
         response = response.replace("<|end_of_text|>", "")
 
         try:
@@ -221,7 +253,6 @@ async def chat(request: ChatRequest):
             ]).execute()
         except Exception as e:
             print(f"Error storing messages: {str(e)}")
-            # Continue even if storage fails
             pass
 
         return {
@@ -232,8 +263,5 @@ async def chat(request: ChatRequest):
     except Exception as e:
         print(f"Error in chat endpoint: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-# if __name__ == "__main__":
-#     uvicorn.run(app, host="0.0.0.0", port=5001, reload=True)
 
-# Run the below command to start the server
-# uvicorn main:app --host 0.0.0.0 --port 5000 --reload
+# Run with: uvicorn main:app --host 0.0.0.0 --port 5000 --reload

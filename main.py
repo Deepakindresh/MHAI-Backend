@@ -42,26 +42,26 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 {}"""
 
 # Load model and tokenizer
-model, tokenizer = FastLanguageModel.from_pretrained(
-    token=os.getenv("HUGGINGFACE_TOKEN"),
-    model_name="Deepakindresh/llama_therapist",
-    max_seq_length=max_seq_length,
-    dtype=dtype,
-    load_in_4bit=load_in_4bit,
-)
-FastLanguageModel.for_inference(model)
+# model, tokenizer = FastLanguageModel.from_pretrained(
+#     token=os.getenv("HUGGINGFACE_TOKEN"),
+#     model_name="Deepakindresh/llama_therapist",
+#     max_seq_length=max_seq_length,
+#     dtype=dtype,
+#     load_in_4bit=load_in_4bit,
+# )
+# FastLanguageModel.for_inference(model)
 
 
 # DeepSeek Llama3.1 8B model
-# deepSeekModel, deepSeekTokenizer = FastLanguageModel.from_pretrained(
-#     model_name="unsloth/DeepSeek-R1-Distill-Llama-8B",  # Load the pre-trained DeepSeek R1 model (8B parameter version)
-#     max_seq_length=max_seq_length, # Ensure the model can process up to 2048 tokens at once
-#     dtype=dtype, # Use the default data type (e.g., FP16 or BF16 depending on hardware support)
-#     load_in_4bit=load_in_4bit, # Load the model in 4-bit quantization to save memory
-#     token=os.getenv("HUGGINGFACE_TOKEN"), # Use hugging face token
-# )
+deepSeekModel, deepSeekTokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/DeepSeek-R1-Distill-Llama-8B",  # Load the pre-trained DeepSeek R1 model (8B parameter version)
+    max_seq_length=max_seq_length, # Ensure the model can process up to 2048 tokens at once
+    dtype=dtype, # Use the default data type (e.g., FP16 or BF16 depending on hardware support)
+    load_in_4bit=load_in_4bit, # Load the model in 4-bit quantization to save memory
+    token=os.getenv("HUGGINGFACE_TOKEN"), # Use hugging face token
+)
 
-# FastLanguageModel.for_inference(deepSeekModel)
+FastLanguageModel.for_inference(deepSeekModel)
 
 # Define request models
 class ChatRequest(BaseModel):
@@ -161,7 +161,7 @@ async def get_relevant_context(user_id: str, current_message: str) -> str:
         
         context_messages = []
         for msg in response.data:
-            role = "Assistant" if msg['is_bot'] else "User"
+            role = "Bot" if msg['is_bot'] else "User"
             context_messages.append(f"{role}: {msg['content']}")
         
         return "\n".join(context_messages[-4:])
@@ -247,18 +247,18 @@ async def chat(request: ChatRequest):
 
         # Generate response
         # if request.modelName == "LLama3":
-        input_ids = tokenizer([prompt], return_tensors="pt").to("cuda")
-        outputs = model.generate(**input_ids, max_new_tokens=4000, use_cache=True)
-        response = tokenizer.batch_decode(outputs)[0].split("### Response:")[1].strip()
-        response = response.replace("<|end_of_text|>", "")
+        # input_ids = tokenizer([prompt], return_tensors="pt").to("cuda")
+        # outputs = model.generate(**input_ids, max_new_tokens=4000, use_cache=True)
+        # response = tokenizer.batch_decode(outputs)[0].split("### Response:")[1].strip()
+        # response = response.replace("<|end_of_text|>", "")
 
         # DeepSeek Integration but RAM not sufficient as of now. So create separate backend for the other process.
         # elif request.modelName == "DeepSeek":
-        #     input_ids = deepSeekTokenizer([prompt], return_tensors="pt").to("cuda")
-        #     outputs = deepSeekModel.generate(**input_ids, max_new_tokens=4000, use_cache=True)
-        #     response = deepSeekTokenizer.batch_decode(outputs)[0].split("</think>")[1].strip()
-        #     response = response.replace("<|end_of_sentence|>", "")
-        #     print("This is the response: ", response)
+        input_ids = deepSeekTokenizer([prompt], return_tensors="pt").to("cuda")
+        outputs = deepSeekModel.generate(**input_ids, max_new_tokens=4000, use_cache=True)
+        response = deepSeekTokenizer.batch_decode(outputs)[0].split("</think>")[1].strip()
+        response = response.replace("< | end_of_sentence | >", "")
+        print("This is the response: ", response)
 
         try:
             user_message_embedding = await get_embeddings(request.text)

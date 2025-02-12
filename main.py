@@ -68,7 +68,7 @@ class ChatRequest(BaseModel):
     text: str
     user_id: str
     last4Messages: str
-    modelName: str
+    # modelName: str
 
 class UserProfile(BaseModel):
     full_name: str

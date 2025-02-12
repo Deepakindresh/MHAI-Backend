@@ -55,6 +55,7 @@ FastLanguageModel.for_inference(model)
 class ChatRequest(BaseModel):
     text: str
     user_id: str
+    last4Messages: str
 
 class UserProfile(BaseModel):
     full_name: str
@@ -76,14 +77,14 @@ async def get_embeddings(text: str) -> list:
     """Generate embeddings using the model and resize to match database dimensions."""
     try:
         with torch.no_grad():
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to("cuda")
+            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2000).to("cuda")
             embeddings = model(**inputs, output_hidden_states=True).hidden_states[-1]
             embeddings = embeddings.float()
             embedding = embeddings.mean(dim=1).squeeze().cpu().numpy()
             
-            if len(embedding) != 512:
+            if len(embedding) != 2000:
                 original_embedding = embedding.reshape(1, -1)
-                target_size = 512
+                target_size = 2000
                 step = len(embedding) // target_size
                 resized_embedding = np.zeros(target_size)
                 
@@ -99,7 +100,7 @@ async def get_embeddings(text: str) -> list:
             return embedding.astype(float).tolist()
     except Exception as e:
         print(f"Error generating embeddings: {str(e)}")
-        return [0.0] * 512
+        return [0.0] * 2000
 
 async def get_user_profile(user_id: str) -> Optional[UserProfile]:
     """Fetch user profile from database."""
@@ -140,7 +141,7 @@ async def get_relevant_context(user_id: str, current_message: str) -> str:
             {
                 'query_embedding': current_embedding,
                 'match_threshold': 0.7,
-                'match_count': 3,
+                'match_count': 4,
                 'user_id': user_id
             }
         ).execute()
@@ -150,7 +151,7 @@ async def get_relevant_context(user_id: str, current_message: str) -> str:
             role = "Assistant" if msg['is_bot'] else "User"
             context_messages.append(f"{role}: {msg['content']}")
         
-        return "\n".join(context_messages[-3:])
+        return "\n".join(context_messages[-4:])
     except Exception as e:
         print(f"Error getting context: {str(e)}")
         return ""
@@ -205,8 +206,11 @@ async def chat(request: ChatRequest):
         
         Current Status: {get_severity_description(assessment) if assessment else 'Not assessed'}
         
-        Recent Conversation Context:
+        Relevant Conversation Context:
         {context}
+
+        Last 4 messages:
+        {request.last4Messages}
         """
 
         # Rest of the chat function remains the same...

@@ -70,6 +70,21 @@ class ChatRequest(BaseModel):
     last4Messages: str
     # modelName: str
 
+
+class ChatV2Request(BaseModel):
+    text: str
+    user_id: str
+    # therapist_id: str
+    # isBot: bool
+
+
+class ChatEditRequest(BaseModel):
+    text: str
+    message_id: str
+    # therapist_id: str
+    # isBot: bool
+
+
 class UserProfile(BaseModel):
     full_name: str
     preferred_name: Optional[str]
@@ -193,6 +208,55 @@ def get_severity_description(assessment: Assessment) -> str:
         return "minimal symptoms"
         
     return ", ".join(descriptions)
+
+
+@app.post("/chatV2")
+async def chatV2(request: ChatV2Request):
+    """Process chat requests with user context and store in database."""
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="No input text provided")
+        
+        user_message_embedding = await get_embeddings(request.text)
+        supabase_client.table('chat_messages').insert([
+            {
+                'user_id': request.user_id,
+                'content': request.text,
+                'is_bot': True,
+                'embedding': user_message_embedding
+            }
+        ]).execute()
+    except Exception as e:
+            print(f"Error storing messages: {str(e)}")
+            pass
+    
+    return {
+            "response": True,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+# Edit chat with message id
+@app.post("/chatEdit")
+async def chatEdit(request: ChatEditRequest):
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="No input text provided")
+        
+        user_message_embedding = await get_embeddings(request.text)
+        supabase_client.table('chat_messages').update({
+            'content': request.text,
+            'embedding': user_message_embedding
+        }).eq('id', request.message_id).execute()
+
+        
+    except Exception as e:
+            print(f"Error storing messages: {str(e)}")
+            pass
+        
+    return {
+            "response": True,
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 @app.post("/chat")

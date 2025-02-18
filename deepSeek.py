@@ -327,6 +327,8 @@ async def chat(request: ChatRequest):
         # Check if there is a word "</think>" in the response
         if "</think>" in response:
             think = response.split("</think>")[0].strip()
+            # Remove <think> from think
+            think = think[7:].strip()
             response = response.split("</think>")[1].strip()
 
         # Remove last 19 characters from response

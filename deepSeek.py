@@ -326,7 +326,7 @@ async def chat(request: ChatRequest):
 
         # Check if there is a word "</think>" in the response
         if "</think>" in response:
-            print(response)
+            think = response.split("</think>")[0].strip()
             response = response.split("</think>")[1].strip()
 
         # Remove last 19 characters from response
@@ -351,7 +351,8 @@ async def chat(request: ChatRequest):
                     'user_id': request.user_id,
                     'content': response,
                     'is_bot': True,
-                    'embedding': bot_message_embedding
+                    'embedding': bot_message_embedding,
+                    'deepseekThink': think if think else None
                     # 'modelName': request.modelName
                 }
             ]).execute()

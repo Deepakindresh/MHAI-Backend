@@ -354,7 +354,7 @@ async def chat(request: ChatRequest):
                     'content': response,
                     'is_bot': True,
                     'embedding': bot_message_embedding,
-                    'deepseekThink': think if think else None
+                    'deepseekThink': think if think else None,
                     # 'modelName': request.modelName
                 }
             ]).execute()

@@ -90,8 +90,8 @@ async def get_embeddings(text: str) -> list:
     """Generate embeddings using the model and resize to match database dimensions."""
     try:
         with torch.no_grad():
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2000).to("cuda")
-            embeddings = model(**inputs, output_hidden_states=True).hidden_states[-1]
+            inputs = deepSeekTokenizer(text, return_tensors="pt", truncation=True, max_length=2000).to("cuda")
+            embeddings = deepSeekModel(**inputs, output_hidden_states=True).hidden_states[-1]
             embeddings = embeddings.float()
             embedding = embeddings.mean(dim=1).squeeze().cpu().numpy()
             

@@ -160,3 +160,8 @@ This is proprietary software. Unauthorized copying, modification, distribution, 
 ## Contributors
 
 Deepakindresh Narayana Gandhi
+
+
+## ENV file
+
+Request me privately to access the Env variables, this should soon be changed to the company's profile.
